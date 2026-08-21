@@ -24,6 +24,17 @@ if (-not $BarkKey) { Write-Host '警告：环境变量 BARK_KEY 没设，只会�
 
 $PartySize = 4
 
+# 行程最后一天。过了就什么都不查直接退出 —— 免得哪天你忘了这个仓库，
+# 它还在替你一年三百六十五天地敲人家的订票站。
+# 定时任务本身没法自己关掉，所以这里只能少花点力气并提醒你去 Disable。
+$TripLastDate = '10/05/2026'
+$tripEnd = [datetime]::ParseExact($TripLastDate, 'MM/dd/yyyy', $null).Date
+if ((Get-Date).Date -gt $tripEnd) {
+    Write-Host "已过行程最后一天（$TripLastDate），本轮不查询。"
+    Write-Host '去 Actions -> 这个 workflow -> 右上角 ... -> Disable workflow 把它关掉。'
+    exit 0
+}
+
 $Targets = @(
     @{ Tag = '首选'; Name = '10/2 去程 Natakhtari->Mestia'; Dep = '7'; Arr = '6'; Date = '10/02/2026' }
     @{ Tag = '备选'; Name = '10/2 去程 Kutaisi->Mestia';    Dep = '5'; Arr = '6'; Date = '10/02/2026' }
