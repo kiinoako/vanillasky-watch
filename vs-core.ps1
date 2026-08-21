@@ -259,14 +259,28 @@ function Expand-BarkKeys {
   这个「有一个就算成功」是有意的 —— 朋友的 key 填错了不该把你自己的通知
   也一起判成失败。但每个失败的都会单独打一行，不会被吞掉。
 #>
+<#
+  推送的四个强度。用错了比不推还糟 —— 天天亮屏的通知会被静音，
+  真正要命的那一条也就跟着被静音了。
+
+    passive   只静默进通知列表，不亮屏不响铃。心跳用这个。
+    active    普通通知，亮屏响一声。默认。
+    critical  无视静音和专注模式持续响，还会打电话（call=1）。
+              只给「放票了」和「十月开卖了」用 —— 这是唯一能把人从睡眠里叫醒的通道，
+              用滥了就废了。
+#>
 function Send-Bark {
     param(
         $Key,
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][string]$Body,
         [string]$Server = 'https://api.day.app',
-        [switch]$Critical
+        [ValidateSet('passive', 'active', 'timeSensitive', 'critical')]
+        [string]$Level = 'active',
+        [switch]$Critical      # 老写法，等同于 -Level critical
     )
+
+    if ($Critical) { $Level = 'critical' }
 
     $keys = Expand-BarkKeys $Key
     if (-not $keys.Count) { return $false }
@@ -278,9 +292,8 @@ function Send-Bark {
         try {
             $u = '{0}/{1}/{2}/{3}' -f $t.Server, $t.Key,
                  [uri]::EscapeDataString($Title), [uri]::EscapeDataString($Body)
-            # critical + call=1 会无视静音和专注模式持续响，这是唯一能把人从睡眠里叫醒的通道
-            if ($Critical) { $u += '?level=critical&volume=8&call=1&group=VanillaSky' }
-            else           { $u += '?group=VanillaSky' }
+            if ($Level -eq 'critical') { $u += '?level=critical&volume=8&call=1&group=VanillaSky' }
+            else                       { $u += "?level=$Level&group=VanillaSky" }
             Invoke-RestMethod -Uri $u -TimeoutSec 15 | Out-Null
             $okCount++
         } catch {
