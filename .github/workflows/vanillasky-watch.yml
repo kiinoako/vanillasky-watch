@@ -1,0 +1,24 @@
+name: Vanilla Sky 放票监测
+
+on:
+  schedule:
+    # 每 5 分钟一次。GitHub 的定时任务经常延迟几分钟，这是兜底不是主力。
+    - cron: '*/5 * * * *'
+  workflow_dispatch:        # 手动触发，用来做首次验证
+
+# 上一轮还没跑完就跳过这一轮，避免堆积
+concurrency:
+  group: vs-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: 查一轮
+        shell: pwsh
+        env:
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+        run: ./watch-once.ps1
