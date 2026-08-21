@@ -22,6 +22,11 @@ on:
     - cron: '*/15 5-15 * * *'     # 格鲁吉亚白天：每 15 分钟
     - cron: '0 16-23,0-4 * * *'   # 其余时段：每小时
   workflow_dispatch:              # 手动触发，用来做验证
+    inputs:
+      test_push:
+        description: '只测推送：不查航班，直接推一条 Bark 到手机'
+        type: boolean
+        default: false
 
 # 上一轮还没跑完就跳过这一轮，避免堆积
 concurrency:
@@ -38,4 +43,5 @@ jobs:
         shell: pwsh
         env:
           BARK_KEY: ${{ secrets.BARK_KEY }}
+          VS_TEST_PUSH: ${{ inputs.test_push }}
         run: ./watch-once.ps1

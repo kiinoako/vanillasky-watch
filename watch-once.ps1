@@ -22,6 +22,26 @@ if (-not (Test-Path $core)) {
 $BarkKey = $env:BARK_KEY
 if (-not $BarkKey) { Write-Host '警告：环境变量 BARK_KEY 没设，只会打日志，不会推送。' }
 
+# 只测推送：在 Actions 页面手动触发时把「只测推送」勾上就会走到这里。
+# 存在的理由：平时六条腿全是「无票」，推送分支根本不会被执行到，
+# 云端到手机这条链断了你也不知道 —— 只有真放票那天才会发现，那时候已经晚了。
+if ("$env:VS_TEST_PUSH" -eq 'true') {
+    Write-Host '只测推送模式：不查航班。'
+    if (-not $BarkKey) {
+        Write-Host '失败：BARK_KEY 这个 Secret 没配，或者名字拼错了。'
+        exit 1
+    }
+    $ok = Send-Bark -Key $BarkKey -Critical `
+          -Title '【测试】云端监测推送正常' `
+          -Body "这条是 GitHub Actions 推的，说明云端到手机这条链是通的。`nUTC $(Get-Date -Format 'MM-dd HH:mm:ss')"
+    if ($ok) {
+        Write-Host '服务端已接收。现在看手机，收到就说明云端兜底真的能叫醒你。'
+        exit 0
+    }
+    Write-Host '推送失败，原因见上面那行。404 基本都是 Secret 里的 key 抄错了（别把整条 URL 填进去）。'
+    exit 1
+}
+
 $PartySize = 4
 
 # 行程最后一天。过了就什么都不查直接退出 —— 免得哪天你忘了这个仓库，
