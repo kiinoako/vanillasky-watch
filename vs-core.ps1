@@ -232,36 +232,63 @@ function Get-MaskedKey {
     return $Key.Substring(0, 3) + ('*' * ($Key.Length - 6)) + $Key.Substring($Key.Length - 3)
 }
 
+<#
+  把 -Key 里的东西摊平成一串 key。
+
+  接受：单个字符串、数组、逗号/分号/换行分隔的一串。
+  最后一种是给云端用的 —— GitHub Secret 只能存一个值，
+  多个人收推送时就往里塞 "key1,key2"。
+#>
+function Expand-BarkKeys {
+    param($Key)
+    $out = @()
+    foreach ($k in @($Key)) {
+        if (-not $k) { continue }
+        foreach ($piece in ("$k" -split '[,;\r\n]')) {
+            $p = $piece.Trim()
+            if ($p) { $out += $p }
+        }
+    }
+    return @($out | Select-Object -Unique)
+}
+
+<#
+  推 Bark。-Key 可以给多个（见 Expand-BarkKeys），会逐个推。
+
+  返回：只要有一个推成功就是 $true。
+  这个「有一个就算成功」是有意的 —— 朋友的 key 填错了不该把你自己的通知
+  也一起判成失败。但每个失败的都会单独打一行，不会被吞掉。
+#>
 function Send-Bark {
     param(
-        [string]$Key,
+        $Key,
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][string]$Body,
         [string]$Server = 'https://api.day.app',
         [switch]$Critical
     )
-    if (-not $Key) { return $false }
 
-    $t = Resolve-BarkTarget -Key $Key -Server $Server
-    if (-not $t.Key) {
-        Write-Host '  -> Bark 推送失败：key 是空的' -ForegroundColor DarkYellow
-        return $false
-    }
+    $keys = Expand-BarkKeys $Key
+    if (-not $keys.Count) { return $false }
 
-    try {
-        $u = '{0}/{1}/{2}/{3}' -f $t.Server, $t.Key,
-             [uri]::EscapeDataString($Title), [uri]::EscapeDataString($Body)
-        # critical + call=1 会无视静音和专注模式持续响，这是唯一能把人从睡眠里叫醒的通道
-        if ($Critical) { $u += '?level=critical&volume=8&call=1&group=VanillaSky' }
-        else           { $u += '?group=VanillaSky' }
-        Invoke-RestMethod -Uri $u -TimeoutSec 15 | Out-Null
-        return $true
-    } catch {
-        Write-Host "  -> Bark 推送失败: $($_.Exception.Message)" -ForegroundColor DarkYellow
-        Write-Host "     用的是 $($t.Server)/$(Get-MaskedKey $t.Key)/…" -ForegroundColor DarkYellow
-        if ($_.Exception.Message -match '404') {
-            Write-Host '     404 一般就是 key 不对：去 Bark App 首页重新抄一遍。' -ForegroundColor DarkYellow
+    $okCount = 0
+    foreach ($k in $keys) {
+        $t = Resolve-BarkTarget -Key $k -Server $Server
+        if (-not $t.Key) { continue }
+        try {
+            $u = '{0}/{1}/{2}/{3}' -f $t.Server, $t.Key,
+                 [uri]::EscapeDataString($Title), [uri]::EscapeDataString($Body)
+            # critical + call=1 会无视静音和专注模式持续响，这是唯一能把人从睡眠里叫醒的通道
+            if ($Critical) { $u += '?level=critical&volume=8&call=1&group=VanillaSky' }
+            else           { $u += '?group=VanillaSky' }
+            Invoke-RestMethod -Uri $u -TimeoutSec 15 | Out-Null
+            $okCount++
+        } catch {
+            Write-Host "  -> Bark 推送失败（$(Get-MaskedKey $t.Key)）: $($_.Exception.Message)" -ForegroundColor DarkYellow
+            if ($_.Exception.Message -match '404') {
+                Write-Host '     404 一般就是这个 key 抄错了。' -ForegroundColor DarkYellow
+            }
         }
-        return $false
     }
+    return ($okCount -gt 0)
 }
