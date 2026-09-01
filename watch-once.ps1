@@ -69,6 +69,8 @@ if ("$env:VS_TEST_PUSH" -eq 'true') {
     exit 1
 }
 
+# 全团人数。只用来判断「Kutaisi 那条够不够四个人一起走」这个兜底。
+# 每条腿实际要几张看 $Targets 里各自的 Pax。
 $PartySize = 4
 
 # 行程最后一天。过了就什么都不查直接退出 —— 免得哪天你忘了这个仓库，
@@ -82,13 +84,25 @@ if ((Get-Date).Date -gt $tripEnd) {
     exit 0
 }
 
+# 【2026-09-01：回程改成分头走，两条腿各买 2 张，都必须抢到】
+#   去程 10/2 四个人一起，首选/备选仍是二选一。
+#   回程 10/5 两条腿各 2 人 —— 谁跟谁一单不写在这里，这是公开仓库。
+#   分组只存在本机的油猴脚本和 乘客信息\ 里。
+#
+#   Pax       这条腿实际要买几张。命中后拿它判断够不够，别再拿全团 4 人去判 ——
+#             回程 2 座正好够，按 4 判会报成「不够」。
+#   MaxProbe  往上试到几座为止。Kutaisi 那条只买 2 张却探到 4，是为了兜底：
+#             Natakhtari 抢不到的话四个人全走 Kutaisi。
+#   Loud      $false = 降级。云端没有铃也没有浏览器，降级只体现在推送级别：
+#             critical（无视静音）降成 active（正常响一声）。
+#   Fallback  $true = 这条腿够全团人数时，推送里多说一句「四个人可以全走这条」。
 $Targets = @(
-    @{ Tag = '首选'; Name = '10/2 去程 Natakhtari->Mestia'; Dep = '7'; Arr = '6'; Date = '10/02/2026' }
-    @{ Tag = '备选'; Name = '10/2 去程 Kutaisi->Mestia';    Dep = '5'; Arr = '6'; Date = '10/02/2026' }
-    @{ Tag = '首选'; Name = '10/5 回程 Mestia->Natakhtari'; Dep = '6'; Arr = '7'; Date = '10/05/2026' }
-    @{ Tag = '备选'; Name = '10/5 回程 Mestia->Kutaisi';    Dep = '6'; Arr = '5'; Date = '10/05/2026' }
-    @{ Tag = '哨兵'; Name = 'Natakhtari->Batumi 10/02';     Dep = '7'; Arr = '4'; Date = '10/02/2026' }
-    @{ Tag = '哨兵'; Name = 'Natakhtari->Ambrolauri 10/02'; Dep = '7'; Arr = '2'; Date = '10/02/2026' }
+    @{ Tag = '首选';     Name = '10/2 去程 Natakhtari->Mestia';          Dep = '7'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false }
+    @{ Tag = '备选';     Name = '10/2 去程 Kutaisi->Mestia';             Dep = '5'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false }
+    @{ Tag = '回程·优先'; Name = '10/5 回程 Mestia->Natakhtari (2 张)';    Dep = '6'; Arr = '7'; Date = '10/05/2026'; Pax = 2; MaxProbe = 2; Loud = $true;  Fallback = $false }
+    @{ Tag = '回程·次要'; Name = '10/5 回程 Mestia->Kutaisi (2 张)';       Dep = '6'; Arr = '5'; Date = '10/05/2026'; Pax = 2; MaxProbe = 4; Loud = $false; Fallback = $true  }
+    @{ Tag = '哨兵';     Name = 'Natakhtari->Batumi 10/02';              Dep = '7'; Arr = '4'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false }
+    @{ Tag = '哨兵';     Name = 'Natakhtari->Ambrolauri 10/02';          Dep = '7'; Arr = '2'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false }
 )
 
 function Get-EnvInt {
@@ -146,12 +160,25 @@ function Invoke-Round {
                     $body  = "$($t.Name) 出票：$($r.Detail)`n梅斯蒂亚可能正在被抢，立刻去看。"
                 } else {
                     Start-Sleep -Seconds 2
-                    $seats = Get-MaxSeats -Dep $t.Dep -Arr $t.Arr -Date $t.Date -Max $PartySize -Ctx $ctx
+                    # 每条腿按自己要买的张数判断，不是按全团四个人
+                    $need  = [int]$t.Pax
+                    $seats = Get-MaxSeats -Dep $t.Dep -Arr $t.Arr -Date $t.Date -Max ([int]$t.MaxProbe) -Ctx $ctx
+                    $enough = if ($seats -ge $need) { "够这一单的 $need 张" } else { "只够 $seats 座，不够这一单的 $need 张" }
                     $title = "【$($t.Tag)】放票了（云端发现）"
-                    $body  = "$($t.Name)  $($t.Date)`n$($r.Detail)  最多可订 $seats 座`nhttps://ticket.vanillasky.ge/en/tickets"
-                    Write-Host "    最多可订 $seats 座"
+                    $body  = "$($t.Name)  $($t.Date)`n$($r.Detail)  最多可订 $seats 座 —— $enough"
+                    # Kutaisi 那条探到 4 座是为了兜底：Natakhtari 抢不到时四个人全走这条。
+                    # 用 $t.Fallback 这个显式开关，不要靠 Arr/Date 去反推是哪条腿 ——
+                    # 那样改一次日期就会静默失效，而这句话恰恰是半夜最需要看到的。
+                    if ($t.Fallback -and $seats -ge $PartySize) {
+                        $body += "`n这条够 $PartySize 座 —— 万一 Natakhtari 那条没抢到，四个人可以全走这条。"
+                    }
+                    $body += "`nhttps://ticket.vanillasky.ge/en/tickets"
+                    Write-Host "    最多可订 $seats 座（本单需 $need）"
                 }
-                Send-Bark -Key $BarkKey -Title $title -Body $body -Critical | Out-Null
+                # 降级的腿（Kutaisi 回程，不抢手）走 active：正常响一声，但不无视静音。
+                # 不该半夜拿好买的那条把人从难买的 Natakhtari 上拽走。
+                if ($t.Loud) { Send-Bark -Key $BarkKey -Title $title -Body $body -Critical | Out-Null }
+                else         { Send-Bark -Key $BarkKey -Title $title -Body $body -Level 'active' | Out-Null }
                 $lastPush[$t.Name] = Get-Date
             }
         }
