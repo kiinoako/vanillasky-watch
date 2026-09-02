@@ -96,13 +96,16 @@ if ((Get-Date).Date -gt $tripEnd) {
 #   Loud      $false = 降级。云端没有铃也没有浏览器，降级只体现在推送级别：
 #             critical（无视静音）降成 active（正常响一声）。
 #   Fallback  $true = 这条腿够全团人数时，推送里多说一句「四个人可以全走这条」。
+#   Sequential $true = 推送里提醒「两单一前一后买」。2026-09-01 实测：两个标签页几乎同时
+#             按锁座，只有一个走到乘客页，另一个落到「THERE ARE NO AVAILABLE TICKETS」——
+#             站点同一个会话容不下两个 hold，而且失败是静默的，看着就像票没了。
 $Targets = @(
-    @{ Tag = '首选';     Name = '10/2 去程 Natakhtari->Mestia';          Dep = '7'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false }
-    @{ Tag = '备选';     Name = '10/2 去程 Kutaisi->Mestia';             Dep = '5'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false }
-    @{ Tag = '回程·优先'; Name = '10/5 回程 Mestia->Natakhtari (2 张)';    Dep = '6'; Arr = '7'; Date = '10/05/2026'; Pax = 2; MaxProbe = 2; Loud = $true;  Fallback = $false }
-    @{ Tag = '回程·次要'; Name = '10/5 回程 Mestia->Kutaisi (2 张)';       Dep = '6'; Arr = '5'; Date = '10/05/2026'; Pax = 2; MaxProbe = 4; Loud = $false; Fallback = $true  }
-    @{ Tag = '哨兵';     Name = 'Natakhtari->Batumi 10/02';              Dep = '7'; Arr = '4'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false }
-    @{ Tag = '哨兵';     Name = 'Natakhtari->Ambrolauri 10/02';          Dep = '7'; Arr = '2'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false }
+    @{ Tag = '首选';     Name = '10/2 去程 Natakhtari->Mestia';          Dep = '7'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
+    @{ Tag = '备选';     Name = '10/2 去程 Kutaisi->Mestia';             Dep = '5'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
+    @{ Tag = '回程·优先'; Name = '10/5 回程 Mestia->Natakhtari (2 张)';    Dep = '6'; Arr = '7'; Date = '10/05/2026'; Pax = 2; MaxProbe = 2; Loud = $true;  Fallback = $false; Sequential = $true }
+    @{ Tag = '回程·次要'; Name = '10/5 回程 Mestia->Kutaisi (2 张)';       Dep = '6'; Arr = '5'; Date = '10/05/2026'; Pax = 2; MaxProbe = 4; Loud = $false; Fallback = $true;  Sequential = $true }
+    @{ Tag = '哨兵';     Name = 'Natakhtari->Batumi 10/02';              Dep = '7'; Arr = '4'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
+    @{ Tag = '哨兵';     Name = 'Natakhtari->Ambrolauri 10/02';          Dep = '7'; Arr = '2'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
 )
 
 function Get-EnvInt {
@@ -171,6 +174,9 @@ function Invoke-Round {
                     # 那样改一次日期就会静默失效，而这句话恰恰是半夜最需要看到的。
                     if ($t.Fallback -and $seats -ge $PartySize) {
                         $body += "`n这条够 $PartySize 座 —— 万一 Natakhtari 那条没抢到，四个人可以全走这条。"
+                    }
+                    if ($t.Sequential) {
+                        $body += "`n回程两单一前一后买：这一单买完（付款）再去买另一单，别同时锁座。"
                     }
                     $body += "`nhttps://ticket.vanillasky.ge/en/tickets"
                     Write-Host "    最多可订 $seats 座（本单需 $need）"
