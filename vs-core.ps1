@@ -16,6 +16,24 @@
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 $ProgressPreference = 'SilentlyContinue'
 
+# ---- 代理绕行：只把订票站从系统代理里摘出来 ----
+# 2026-09-03 踩的坑：本机代理客户端（系统代理 127.0.0.1:7897）的上游对
+# ticket.vanillasky.ge 是「CONNECT 通、TLS 收不到握手」，于是每一轮都写
+# 「建会话失败，本轮跳过（网络或站点问题）」——看着像站点挂了，其实是代理挂了。
+# 同一时刻直连这个站点又快又稳（2-4 秒），所以只绕过这一个域名。
+# 其余流量（Bark 推送 api.day.app）**必须继续走代理**，那条链路是好的，
+# 一起绕过反而可能把报警推送弄断——报警断了这套东西就白做了。
+# 云端 Actions 上没有系统代理，GetProxy 返回目标地址本身，这段等于空操作。
+try {
+    $__vsProbe = [Uri]'https://api.day.app/'
+    $__vsVia   = [Net.WebRequest]::GetSystemWebProxy().GetProxy($__vsProbe)
+    if ($__vsVia -and $__vsVia.AbsoluteUri -ne $__vsProbe.AbsoluteUri) {
+        $__vsWp = New-Object Net.WebProxy($__vsVia, $true)
+        $__vsWp.BypassList = @('.*vanillasky\.ge.*')
+        [Net.WebRequest]::DefaultWebProxy = $__vsWp
+    }
+} catch { }
+
 $Global:VSBase = 'https://ticket.vanillasky.ge'
 $Global:VSUA   = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
