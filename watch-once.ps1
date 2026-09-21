@@ -183,7 +183,23 @@ function Invoke-Round {
                 }
                 # 降级的腿（Kutaisi 回程，不抢手）走 active：正常响一声，但不无视静音。
                 # 不该半夜拿好买的那条把人从难买的 Natakhtari 上拽走。
-                if ($t.Loud) { Send-Bark -Key $BarkKey -Title $title -Body $body -Critical | Out-Null }
+                if ($t.Loud) {
+                    # 2026-09-21 加：9/23 那两段时间里主账号不该无视静音地响。
+                    # BARK_KEY 这个 Secret 里第一个 key 就是主账号 —— 同步云端.ps1
+                    # 按 $BarkKey -> $BarkAlso 的顺序抄，主账号一定排在最前面。
+                    # 以后往 Secret 里加人请往后面加，别插到第一个去。
+                    $allKeys = @(Expand-BarkKeys $BarkKey)
+                    $mainKey = @($allKeys | Select-Object -First 1)
+                    $others  = @($allKeys | Select-Object -Skip 1)
+                    $myLevel = Get-BarkAlertLevel -IsMain -Base 'critical'
+                    if ($myLevel -ne 'critical') {
+                        Write-Host "    9/23 静音时段：主账号这条走 $myLevel，其他人照旧 critical"
+                    }
+                    Send-Bark -Key $mainKey -Title $title -Body $body -Level $myLevel | Out-Null
+                    if ($others.Count) {
+                        Send-Bark -Key $others -Title $title -Body $body -Level 'critical' | Out-Null
+                    }
+                }
                 else         { Send-Bark -Key $BarkKey -Title $title -Body $body -Level 'active' | Out-Null }
                 $lastPush[$t.Name] = Get-Date
             }

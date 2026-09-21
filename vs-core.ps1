@@ -323,3 +323,55 @@ function Send-Bark {
     }
     return ($okCount -gt 0)
 }
+
+<#
+  9/23 的「别出声」时段（北京时间）。
+
+  【2026-09-21 加】
+    9/23 上午 09:00-12:30、下午 14:00-17:30 人在外面走不开。
+    critical 是无视静音开关持续响铃、还会打电话（call=1）的那一档 ——
+    这两段时间里当众炸响一次的代价，比晚两分钟看到大得多。
+    所以这两段时间里**只有主账号**降一档走 timeSensitive：
+      照样穿透专注模式、锁屏上照样是横幅、照样置顶；
+      但尊重静音开关 —— 手机静音时不出声、不打电话。
+    同行的人那份完全不动，照旧 critical 带声音 ——
+    真放票时至少有别人的手机会响，不至于四个人一起漏掉。
+
+  只卡 9/23 这两段，别的时间、别的日子一律照旧。
+  过了这天这个函数永远返回 $false，不用回来手动拆。
+#>
+$Global:VSQuietDate    = '2026-09-23'
+$Global:VSQuietWindows = @(
+    @{ From = '09:00'; To = '12:30' },
+    @{ From = '14:00'; To = '17:30' }
+)
+
+function Test-BarkQuietWindow {
+    param([datetime]$Now)
+
+    # 一律拿 UTC+8 自己算北京时间，不用 Get-Date ——
+    # 本机是北京时区没问题，但 GitHub Actions 的 runner 是 UTC，
+    # 用本地时间会让云端那份整整错开八小时（正好把两个窗口错到夜里）。
+    if (-not $PSBoundParameters.ContainsKey('Now')) { $Now = [datetime]::UtcNow.AddHours(8) }
+
+    if ($Now.ToString('yyyy-MM-dd') -ne $Global:VSQuietDate) { return $false }
+    foreach ($w in $Global:VSQuietWindows) {
+        $from = [datetime]::ParseExact(('{0} {1}' -f $Global:VSQuietDate, $w.From), 'yyyy-MM-dd HH:mm', $null)
+        $to   = [datetime]::ParseExact(('{0} {1}' -f $Global:VSQuietDate, $w.To),   'yyyy-MM-dd HH:mm', $null)
+        if ($Now -ge $from -and $Now -lt $to) { return $true }
+    }
+    return $false
+}
+
+<#
+  「这条 critical 对这个人该用哪一档」只在这一个地方决定。
+
+  -IsMain 主账号那份。在上面那两段时间里降成 timeSensitive，其他时候原样。
+  非主账号（同行的人）传不传 -IsMain 都行，返回的永远是原样的 $Base。
+  passive / active 这些本来就不响得厉害的档不受影响。
+#>
+function Get-BarkAlertLevel {
+    param([switch]$IsMain, [string]$Base = 'critical')
+    if ($Base -eq 'critical' -and $IsMain -and (Test-BarkQuietWindow)) { return 'timeSensitive' }
+    return $Base
+}
