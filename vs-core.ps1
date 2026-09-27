@@ -295,7 +295,10 @@ function Send-Bark {
         [string]$Server = 'https://api.day.app',
         [ValidateSet('passive', 'active', 'timeSensitive', 'critical')]
         [string]$Level = 'active',
-        [switch]$Critical      # 老写法，等同于 -Level critical
+        [switch]$Critical,     # 老写法，等同于 -Level critical
+        # 2026-09-27 加：点通知直接打开的链接。给 #vsauto=1 抢票链用 ——
+        # 人不在电脑旁时，iPhone 上点通知就进 Safari，油猴（Userscripts）按链接里的参数接管。
+        [string]$Url
     )
 
     if ($Critical) { $Level = 'critical' }
@@ -312,6 +315,7 @@ function Send-Bark {
                  [uri]::EscapeDataString($Title), [uri]::EscapeDataString($Body)
             if ($Level -eq 'critical') { $u += '?level=critical&volume=8&call=1&group=VanillaSky' }
             else                       { $u += "?level=$Level&group=VanillaSky" }
+            if ($Url) { $u += '&url=' + [uri]::EscapeDataString($Url) }
             Invoke-RestMethod -Uri $u -TimeoutSec 15 | Out-Null
             $okCount++
         } catch {

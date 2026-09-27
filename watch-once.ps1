@@ -158,7 +158,14 @@ function Invoke-Round {
             }
 
             if (-not $skip) {
+                # 2026-09-27 加：点通知直接进抢票链。iPhone 装了 Userscripts 之后，
+                # Safari 打开这条链接，脚本按 #vsauto 参数自动搜索、停在班次列表、按 pax 选这一单的人。
+                # 参数里只有航线/日期/张数，没有任何乘客信息，可以放进公开仓库。
+                $link = 'https://ticket.vanillasky.ge/en/tickets#vsauto=1&dep={0}&arr={1}&date={2}&pax={3}' -f `
+                        $t.Dep, $t.Arr, $t.Date, $t.Pax
                 if ($t.Tag -eq '哨兵') {
+                    # 哨兵是 Batumi/Ambrolauri，本身不买 —— 链接指向真正要抢的 10/2 去程
+                    $link = 'https://ticket.vanillasky.ge/en/tickets#vsauto=1&dep=7&arr=6&date=10/02/2026&pax=4'
                     $title = '十月开卖了（云端发现）'
                     $body  = "$($t.Name) 出票：$($r.Detail)`n梅斯蒂亚可能正在被抢，立刻去看。"
                 } else {
@@ -178,7 +185,7 @@ function Invoke-Round {
                     if ($t.Sequential) {
                         $body += "`n回程两单一前一后买：这一单买完（付款）再去买另一单，别同时锁座。"
                     }
-                    $body += "`nhttps://ticket.vanillasky.ge/en/tickets"
+                    $body += "`n点这条通知直接进抢票页（手机需装好 Userscripts 脚本）"
                     Write-Host "    最多可订 $seats 座（本单需 $need）"
                 }
                 # 降级的腿（Kutaisi 回程，不抢手）走 active：正常响一声，但不无视静音。
@@ -195,12 +202,12 @@ function Invoke-Round {
                     if ($myLevel -ne 'critical') {
                         Write-Host "    9/23 静音时段：主账号这条走 $myLevel，其他人照旧 critical"
                     }
-                    Send-Bark -Key $mainKey -Title $title -Body $body -Level $myLevel | Out-Null
+                    Send-Bark -Key $mainKey -Title $title -Body $body -Level $myLevel -Url $link | Out-Null
                     if ($others.Count) {
-                        Send-Bark -Key $others -Title $title -Body $body -Level 'critical' | Out-Null
+                        Send-Bark -Key $others -Title $title -Body $body -Level 'critical' -Url $link | Out-Null
                     }
                 }
-                else         { Send-Bark -Key $BarkKey -Title $title -Body $body -Level 'active' | Out-Null }
+                else         { Send-Bark -Key $BarkKey -Title $title -Body $body -Level 'active' -Url $link | Out-Null }
                 $lastPush[$t.Name] = Get-Date
             }
         }
