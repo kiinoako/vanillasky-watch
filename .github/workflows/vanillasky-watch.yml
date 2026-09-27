@@ -56,6 +56,10 @@ on:
         description: '多少秒查一轮（留空 = 白天 300 / 夜里 900）。开卖当天手动长跑建议 120'
         type: string
         default: ''
+      relay:
+        description: '跑完自动接力再起一次（一直接到行程最后一天；Cancel 这次 run 就断）'
+        type: boolean
+        default: false
 
 # 定时那条排队接力；手动触发单独一组，不用排在 50 分钟的循环后面等着。
 concurrency:
@@ -85,3 +89,46 @@ jobs:
           VS_ROUND_NIGHT_SEC: ${{ inputs.round_sec || 900 }}   # 其余时段：15 分钟一轮
           VS_PUSH_COOLDOWN_MIN: 15    # 同一条腿 15 分钟内不重复推，免得把 Bark 吵到被静音
         run: ./watch-once.ps1
+
+  # ------------------------------------------------------------------------------
+  # 2026-09-27 加：接力。手动长跑单次最多 6 小时，跑完由这个 job 再触发一次同样参数的 run。
+  # ------------------------------------------------------------------------------
+  #   · GITHUB_TOKEN 触发的 workflow_dispatch 会产生新 run（官方文档写明的例外），
+  #     所以不需要额外的 PAT，只要给这个 job actions: write。
+  #   · 新 run 和本 run 同在 vs-watch-workflow_dispatch 这个 concurrency 组，
+  #     会排队到本 run 结束后立刻开跑，前后几乎无缝。
+  #   · 怎么停：在 Actions 页面 Cancel 正在跑的那次（watch 结果是 cancelled 就不接）；
+  #     或仓库变量 VS_RELAY 设成 off；或 Disable workflow。过了行程最后一天也自动不接。
+  #   · 只在 watch 成功时接：脚本出错反复秒退时，接力会变成每分钟起一次的死循环。
+  #     同理 loop_minutes 太短（调试用的 0）也不接。
+  relay:
+    needs: watch
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.relay
+      && needs.watch.result == 'success' && vars.VS_RELAY != 'off'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: 接力
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          LOOP: ${{ inputs.loop_minutes }}
+          ROUND: ${{ inputs.round_sec }}
+          TRIP_LAST: '2026-10-05'     # 跟 watch-once.ps1 的 $TripLastDate 保持一致
+        run: |
+          today=$(date -u +%F)
+          if [[ "$today" > "$TRIP_LAST" ]]; then
+            echo "已过行程最后一天（$TRIP_LAST），不再接力。记得去 Disable workflow。"
+            exit 0
+          fi
+          if ! [[ "$LOOP" =~ ^[0-9]+$ ]] || (( LOOP < 30 )); then
+            echo "loop_minutes=$LOOP 太短，不接力（防止秒退死循环）。"
+            exit 0
+          fi
+          gh workflow run vanillasky-watch.yml --ref "$REF" \
+            -f loop_minutes="$LOOP" -f round_sec="$ROUND" -f relay=true
+          echo "已接力：新 run 会在本次结束后接着跑 $LOOP 分钟。"
