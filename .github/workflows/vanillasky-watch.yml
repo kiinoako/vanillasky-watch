@@ -52,6 +52,10 @@ on:
         description: '循环多少分钟（0 = 只查一轮就退出，调试用）'
         type: string
         default: '0'
+      round_sec:
+        description: '多少秒查一轮（留空 = 白天 300 / 夜里 900）。开卖当天手动长跑建议 120'
+        type: string
+        default: ''
 
 # 定时那条排队接力；手动触发单独一组，不用排在 50 分钟的循环后面等着。
 concurrency:
@@ -63,7 +67,11 @@ jobs:
     runs-on: ubuntu-latest
     # 比 VS_LOOP_MINUTES 多留 5 分钟：脚本自己会在 35 分钟处收尾，
     # 这里是万一它收不了尾时的硬上限。调大 VS_LOOP_MINUTES 时记得一起调这个。
-    timeout-minutes: 40
+    #
+    # 2026-09-27 加：手动触发放宽到 355 分钟（GitHub 托管 runner 单 job 上限 360）。
+    # 定时触发实测已稀到 3-5 小时一次，开卖当天靠手动长跑盯：
+    #   loop_minutes=340、round_sec=120。表达式不支持加法，所以按事件类型二选一。
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 355 || 40 }}
     steps:
       - uses: actions/checkout@v4
       - name: 查
@@ -72,7 +80,7 @@ jobs:
           BARK_KEY: ${{ secrets.BARK_KEY }}
           VS_TEST_PUSH: ${{ inputs.test_push }}
           VS_LOOP_MINUTES: ${{ inputs.loop_minutes || 35 }}
-          VS_ROUND_EVERY_SEC: 300     # 格鲁吉亚白天（UTC 05-15）：5 分钟一轮
-          VS_ROUND_NIGHT_SEC: 900     # 其余时段：15 分钟一轮
+          VS_ROUND_EVERY_SEC: ${{ inputs.round_sec || 300 }}   # 格鲁吉亚白天（UTC 05-15）：5 分钟一轮
+          VS_ROUND_NIGHT_SEC: ${{ inputs.round_sec || 900 }}   # 其余时段：15 分钟一轮
           VS_PUSH_COOLDOWN_MIN: 15    # 同一条腿 15 分钟内不重复推，免得把 Bark 吵到被静音
         run: ./watch-once.ps1
