@@ -68,10 +68,11 @@ jobs:
     # 比 VS_LOOP_MINUTES 多留 5 分钟：脚本自己会在 35 分钟处收尾，
     # 这里是万一它收不了尾时的硬上限。调大 VS_LOOP_MINUTES 时记得一起调这个。
     #
-    # 2026-09-27 加：手动触发放宽到 355 分钟（GitHub 托管 runner 单 job 上限 360）。
+    # 2026-09-27 加：手动触发放到 GitHub 托管 runner 的单 job 上限 360 分钟（6 小时，官方文档）。
     # 定时触发实测已稀到 3-5 小时一次，开卖当天靠手动长跑盯：
-    #   loop_minutes=340、round_sec=120。表达式不支持加法，所以按事件类型二选一。
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 355 || 40 }}
+    #   loop_minutes=350、round_sec=120。留 10 分钟给 checkout 和最后一轮收尾。
+    #   表达式不支持加法，所以按事件类型二选一。
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 360 || 40 }}
     steps:
       - uses: actions/checkout@v4
       - name: 查
