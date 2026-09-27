@@ -88,6 +88,8 @@ jobs:
           VS_ROUND_EVERY_SEC: ${{ inputs.round_sec || 300 }}   # 格鲁吉亚白天（UTC 05-15）：5 分钟一轮
           VS_ROUND_NIGHT_SEC: ${{ inputs.round_sec || 900 }}   # 其余时段：15 分钟一轮
           VS_PUSH_COOLDOWN_MIN: 15    # 同一条腿 15 分钟内不重复推，免得把 Bark 吵到被静音
+          # 手动长跑每 60 分钟给主账号推一条心跳（本趟第一轮后先推一条）；定时触发不推
+          VS_HEARTBEAT_MIN: ${{ github.event_name == 'workflow_dispatch' && 60 || 0 }}
         run: ./watch-once.ps1
 
   # ------------------------------------------------------------------------------

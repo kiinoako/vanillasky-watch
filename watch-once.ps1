@@ -232,10 +232,42 @@ Write-Host "循环模式：跑到 UTC $($deadline.ToUniversalTime().ToString('HH
 Write-Host "节奏：格鲁吉亚白天（UTC 05-15）每 $RoundDay 秒一轮，其余时段每 $RoundNight 秒一轮。"
 Write-Host ''
 
+# 【2026-09-27 加：云端心跳】
+#   人不在电脑旁、本机也可能断网时，「没收到推送」分不清是没放票还是云端停了。
+#   所以手动长跑期间每 VS_HEARTBEAT_MIN 分钟给主账号推一条汇总，本趟第一轮查完就先推一条。
+#   只推主账号（同行的人不需要知道监测的死活）；平时走 passive 静默进通知列表，
+#   但这一段时间里轮轮出错就升成 active 响一声 —— 那是云端实际上已经瞎了。
+$HeartbeatMin = Get-EnvInt 'VS_HEARTBEAT_MIN' 0
+$hbMainKey    = @(Expand-BarkKeys $BarkKey | Select-Object -First 1)
+$nextBeat     = Get-Date
+$hbRounds = 0; $hbErrRounds = 0; $hbHits = 0; $hbSince = Get-Date
+
+function Send-CloudHeartbeat {
+    $bj     = [datetime]::UtcNow.AddHours(8)
+    $bjEnd  = $deadline.ToUniversalTime().AddHours(8)
+    $mins   = [int][math]::Round(((Get-Date) - $hbSince).TotalMinutes)
+    $allBad = ($hbRounds -gt 0 -and $hbErrRounds -eq $hbRounds)
+    $title  = if ($allBad) { '云端监测：这段时间轮轮出错' } else { '云端监测正常' }
+    $body   = "北京时间 $($bj.ToString('HH:mm'))｜过去 $mins 分钟查了 $hbRounds 轮，出错 $hbErrRounds 轮"
+    $body  += if ($hbHits -gt 0) { "`n期间有 $hbHits 次命中，放票推送已单独发出" } else { '，全部无票' }
+    $body  += "`n本趟跑到北京时间 $($bjEnd.ToString('HH:mm'))，之后自动接力"
+    $level  = if ($allBad) { 'active' } else { 'passive' }
+    if ($BarkKey) { Send-Bark -Key $hbMainKey -Title $title -Body $body -Level $level | Out-Null }
+    Write-Host "  [心跳] $title / $($body -replace "`n", ' / ')"
+}
+
 $round = 0
 while ($true) {
     $round++
-    Invoke-Round -Index $round | Out-Null
+    $res = @(Invoke-Round -Index $round)[-1]
+    $hbRounds++
+    if ($res -and $res.Errs) { $hbErrRounds++ }
+    if ($res -and $res.Hits) { $hbHits += $res.Hits }
+    if ($HeartbeatMin -gt 0 -and (Get-Date) -ge $nextBeat) {
+        Send-CloudHeartbeat
+        $hbRounds = 0; $hbErrRounds = 0; $hbHits = 0; $hbSince = Get-Date
+        $nextBeat = (Get-Date).AddMinutes($HeartbeatMin)
+    }
 
     # 每轮重看一次收工条件 —— 这个 job 要跑将近一小时，中间跨过零点也算数
     if ((Get-Date).Date -gt $tripEnd) {
