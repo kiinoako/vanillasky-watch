@@ -99,13 +99,20 @@ if ((Get-Date).Date -gt $tripEnd) {
 #   Sequential $true = 推送里提醒「两单一前一后买」。2026-09-01 实测：两个标签页几乎同时
 #             按锁座，只有一个走到乘客页，另一个落到「THERE ARE NO AVAILABLE TICKETS」——
 #             站点同一个会话容不下两个 hold，而且失败是静默的，看着就像票没了。
+#
+# 【2026-09-28 改：十月已开卖，只盯主抢】
+#   9/28 18:25（北京）十月库存放出：哨兵 Batumi/Ambrolauri、Kutaisi 回程都有票了，
+#   但 Natakhtari<->Mestia 两个方向整条线（9 月底到 10/9 每一天）仍然全空。
+#   · 哨兵删掉：它的使命（探测十月上架）已经完成，留着只会拖慢主抢那两条的节奏。
+#   · Loud=$false 的腿改成「安静腿」：不单独推送，状态并进每小时心跳（passive）；
+#     且每 VS_QUIET_EVERY_MIN 分钟才查一次，每一轮的时间都留给主抢的两条。
+#     备选（Kutaisi->Mestia 10/2）也归为安静腿 —— 排班表里这天本来就没这条航班。
+#   · 只有 Loud=$true 的两条（Natakhtari 往返）命中才 critical 强提醒。
 $Targets = @(
     @{ Tag = '首选';     Name = '10/2 去程 Natakhtari->Mestia';          Dep = '7'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
-    @{ Tag = '备选';     Name = '10/2 去程 Kutaisi->Mestia';             Dep = '5'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
     @{ Tag = '回程·优先'; Name = '10/5 回程 Mestia->Natakhtari (2 张)';    Dep = '6'; Arr = '7'; Date = '10/05/2026'; Pax = 2; MaxProbe = 2; Loud = $true;  Fallback = $false; Sequential = $true }
+    @{ Tag = '备选';     Name = '10/2 去程 Kutaisi->Mestia';             Dep = '5'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $false; Fallback = $false; Sequential = $false }
     @{ Tag = '回程·次要'; Name = '10/5 回程 Mestia->Kutaisi (2 张)';       Dep = '6'; Arr = '5'; Date = '10/05/2026'; Pax = 2; MaxProbe = 4; Loud = $false; Fallback = $true;  Sequential = $true }
-    @{ Tag = '哨兵';     Name = 'Natakhtari->Batumi 10/02';              Dep = '7'; Arr = '4'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
-    @{ Tag = '哨兵';     Name = 'Natakhtari->Ambrolauri 10/02';          Dep = '7'; Arr = '2'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
 )
 
 function Get-EnvInt {
@@ -121,9 +128,14 @@ $LoopMinutes  = Get-EnvInt 'VS_LOOP_MINUTES'      0
 $RoundDay     = Get-EnvInt 'VS_ROUND_EVERY_SEC'   300
 $RoundNight   = Get-EnvInt 'VS_ROUND_NIGHT_SEC'   900
 $CooldownMin  = Get-EnvInt 'VS_PUSH_COOLDOWN_MIN' 15
+$QuietEvery   = Get-EnvInt 'VS_QUIET_EVERY_MIN'   10
 
 # 同一条腿上次推送的时间。key 是腿的名字。
 $lastPush = @{}
+
+# 安静腿：上次查的时间、最近一次的状态（一行字，心跳里原样带出去）
+$lastQuiet   = (Get-Date).AddYears(-1)
+$QuietStatus = [ordered]@{}
 
 function Invoke-Round {
     param([int]$Index)
@@ -138,11 +150,35 @@ function Invoke-Round {
         return @{ Hits = 0; Errs = 1 }
     }
 
+    # 安静腿每 $QuietEvery 分钟才查一次，其余轮次只查主抢
+    $doQuiet = ((Get-Date) - $script:lastQuiet).TotalMinutes -ge $QuietEvery
+    if ($doQuiet) { $script:lastQuiet = Get-Date }
+
     foreach ($t in $Targets) {
+        if (-not $t.Loud -and -not $doQuiet) { continue }
+
         $r = Test-Availability -Dep $t.Dep -Arr $t.Arr -Date $t.Date -Pax 1 -Ctx $ctx
         $line = '[{0}] 【{1}】{2}  {3}  ->  {4} {5}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),
                 $t.Tag, $t.Name, $t.Date, $r.State, $r.Detail
         Write-Host $line
+
+        # 安静腿：不推送，只记下状态，等心跳一起带出去
+        if (-not $t.Loud) {
+            $stamp = [datetime]::UtcNow.AddHours(8).ToString('HH:mm')
+            switch ($r.State) {
+                'AVAILABLE' {
+                    Start-Sleep -Seconds 2
+                    $seats = Get-MaxSeats -Dep $t.Dep -Arr $t.Arr -Date $t.Date -Max ([int]$t.MaxProbe) -Ctx $ctx
+                    $s = "有票 $($r.Detail)，最多 $seats 座"
+                    if ($t.Fallback -and $seats -ge $PartySize) { $s += "（够四人全走）" }
+                    $script:QuietStatus["【$($t.Tag)】$($t.Name)"] = "$s（$stamp 查）"
+                }
+                'NONE'  { $script:QuietStatus["【$($t.Tag)】$($t.Name)"] = "无票（$stamp 查）" }
+                default { $errs++ }
+            }
+            Start-Sleep -Seconds 2
+            continue
+        }
 
         if ($r.State -eq 'AVAILABLE') {
             $hits++
@@ -163,52 +199,38 @@ function Invoke-Round {
                 # 参数里只有航线/日期/张数，没有任何乘客信息，可以放进公开仓库。
                 $link = 'https://ticket.vanillasky.ge/en/tickets#vsauto=1&dep={0}&arr={1}&date={2}&pax={3}' -f `
                         $t.Dep, $t.Arr, $t.Date, $t.Pax
-                if ($t.Tag -eq '哨兵') {
-                    # 哨兵是 Batumi/Ambrolauri，本身不买 —— 链接指向真正要抢的 10/2 去程
-                    $link = 'https://ticket.vanillasky.ge/en/tickets#vsauto=1&dep=7&arr=6&date=10/02/2026&pax=4'
-                    $title = '十月开卖了（云端发现）'
-                    $body  = "$($t.Name) 出票：$($r.Detail)`n梅斯蒂亚可能正在被抢，立刻去看。"
-                } else {
-                    Start-Sleep -Seconds 2
-                    # 每条腿按自己要买的张数判断，不是按全团四个人
-                    $need  = [int]$t.Pax
-                    $seats = Get-MaxSeats -Dep $t.Dep -Arr $t.Arr -Date $t.Date -Max ([int]$t.MaxProbe) -Ctx $ctx
-                    $enough = if ($seats -ge $need) { "够这一单的 $need 张" } else { "只够 $seats 座，不够这一单的 $need 张" }
-                    $title = "【$($t.Tag)】放票了（云端发现）"
-                    $body  = "$($t.Name)  $($t.Date)`n$($r.Detail)  最多可订 $seats 座 —— $enough"
-                    # Kutaisi 那条探到 4 座是为了兜底：Natakhtari 抢不到时四个人全走这条。
-                    # 用 $t.Fallback 这个显式开关，不要靠 Arr/Date 去反推是哪条腿 ——
-                    # 那样改一次日期就会静默失效，而这句话恰恰是半夜最需要看到的。
-                    if ($t.Fallback -and $seats -ge $PartySize) {
-                        $body += "`n这条够 $PartySize 座 —— 万一 Natakhtari 那条没抢到，四个人可以全走这条。"
-                    }
-                    if ($t.Sequential) {
-                        $body += "`n回程两单一前一后买：这一单买完（付款）再去买另一单，别同时锁座。"
-                    }
-                    $body += "`n点这条通知直接进抢票页（手机需装好 Userscripts 脚本）"
-                    Write-Host "    最多可订 $seats 座（本单需 $need）"
+                # 走到这里的一定是主抢（安静腿上面已经 continue 掉了）。
+                # 【2026-09-28 改：先推 critical，再探余座】
+                #   原来是先 4→3→2 逐个探余座（多两三次 POST，二三十秒）再推 ——
+                #   Natakhtari 这条几个座位几分钟就没，这二三十秒不能花在推送之前。
+                #   现在命中就立刻强提醒，余座数探完再补一条普通推送。
+                $need  = [int]$t.Pax
+                $title = "【$($t.Tag)】放票了（云端发现）"
+                $body  = "$($t.Name)  $($t.Date)`n$($r.Detail)  余座确认中，先去抢"
+                if ($t.Sequential) {
+                    $body += "`n回程两单一前一后买：这一单买完（付款）再去买另一单，别同时锁座。"
                 }
-                # 降级的腿（Kutaisi 回程，不抢手）走 active：正常响一声，但不无视静音。
-                # 不该半夜拿好买的那条把人从难买的 Natakhtari 上拽走。
-                if ($t.Loud) {
-                    # 2026-09-21 加：9/23 那两段时间里主账号不该无视静音地响。
-                    # BARK_KEY 这个 Secret 里第一个 key 就是主账号 —— 同步云端.ps1
-                    # 按 $BarkKey -> $BarkAlso 的顺序抄，主账号一定排在最前面。
-                    # 以后往 Secret 里加人请往后面加，别插到第一个去。
-                    $allKeys = @(Expand-BarkKeys $BarkKey)
-                    $mainKey = @($allKeys | Select-Object -First 1)
-                    $others  = @($allKeys | Select-Object -Skip 1)
-                    $myLevel = Get-BarkAlertLevel -IsMain -Base 'critical'
-                    if ($myLevel -ne 'critical') {
-                        Write-Host "    9/23 静音时段：主账号这条走 $myLevel，其他人照旧 critical"
-                    }
-                    Send-Bark -Key $mainKey -Title $title -Body $body -Level $myLevel -Url $link | Out-Null
-                    if ($others.Count) {
-                        Send-Bark -Key $others -Title $title -Body $body -Level 'critical' -Url $link | Out-Null
-                    }
+                $body += "`n点这条通知直接进抢票页（手机需装好 Userscripts 脚本）"
+
+                # BARK_KEY 这个 Secret 里第一个 key 就是主账号 —— 同步云端.ps1
+                # 按 $BarkKey -> $BarkAlso 的顺序抄，主账号一定排在最前面。
+                # 以后往 Secret 里加人请往后面加，别插到第一个去。
+                $allKeys = @(Expand-BarkKeys $BarkKey)
+                $mainKey = @($allKeys | Select-Object -First 1)
+                $others  = @($allKeys | Select-Object -Skip 1)
+                $myLevel = Get-BarkAlertLevel -IsMain -Base 'critical'
+                Send-Bark -Key $mainKey -Title $title -Body $body -Level $myLevel -Url $link | Out-Null
+                if ($others.Count) {
+                    Send-Bark -Key $others -Title $title -Body $body -Level 'critical' -Url $link | Out-Null
                 }
-                else         { Send-Bark -Key $BarkKey -Title $title -Body $body -Level 'active' -Url $link | Out-Null }
                 $lastPush[$t.Name] = Get-Date
+
+                # 补一条余座数（普通推送，只给主账号）
+                $seats  = Get-MaxSeats -Dep $t.Dep -Arr $t.Arr -Date $t.Date -Max ([int]$t.MaxProbe) -Ctx $ctx
+                $enough = if ($seats -ge $need) { "够这一单的 $need 张" } else { "只够 $seats 座，不够这一单的 $need 张，先把能锁的锁住" }
+                Write-Host "    最多可订 $seats 座（本单需 $need）"
+                Send-Bark -Key $mainKey -Title "【$($t.Tag)】余座：最多 $seats 座" `
+                          -Body "$($t.Name)  $($t.Date)`n$enough" -Level 'active' -Url $link | Out-Null
             }
         }
         elseif ($r.State -eq 'ERROR') { $errs++ }
@@ -249,7 +271,9 @@ function Send-CloudHeartbeat {
     $allBad = ($hbRounds -gt 0 -and $hbErrRounds -eq $hbRounds)
     $title  = if ($allBad) { '云端监测：这段时间轮轮出错' } else { '云端监测正常' }
     $body   = "北京时间 $($bj.ToString('HH:mm'))｜过去 $mins 分钟查了 $hbRounds 轮，出错 $hbErrRounds 轮"
-    $body  += if ($hbHits -gt 0) { "`n期间有 $hbHits 次命中，放票推送已单独发出" } else { '，全部无票' }
+    $body  += if ($hbHits -gt 0) { "`n主抢期间有 $hbHits 次命中，强提醒已单独发出" } else { '，主抢（Natakhtari 往返）无票' }
+    # 2026-09-28 加：安静腿（Kutaisi 回程 / 备选去程）不单独推，状态并在这里
+    foreach ($k in $QuietStatus.Keys) { $body += "`n$k：$($QuietStatus[$k])" }
     $body  += "`n本趟跑到北京时间 $($bjEnd.ToString('HH:mm'))，之后自动接力"
     $level  = if ($allBad) { 'active' } else { 'passive' }
     if ($BarkKey) { Send-Bark -Key $hbMainKey -Title $title -Body $body -Level $level | Out-Null }
