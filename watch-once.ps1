@@ -106,12 +106,11 @@ if ((Get-Date).Date -gt $tripEnd) {
 #   · 哨兵删掉：它的使命（探测十月上架）已经完成，留着只会拖慢主抢那两条的节奏。
 #   · Loud=$false 的腿改成「安静腿」：不单独推送，状态并进每小时心跳（passive）；
 #     且每 VS_QUIET_EVERY_MIN 分钟才查一次，每一轮的时间都留给主抢的两条。
-#     备选（Kutaisi->Mestia 10/2）也归为安静腿 —— 排班表里这天本来就没这条航班。
+#   · 备选去程（Kutaisi->Mestia 10/2）删掉：用户决定去程只走 Natakhtari。
 #   · 只有 Loud=$true 的两条（Natakhtari 往返）命中才 critical 强提醒。
 $Targets = @(
     @{ Tag = '首选';     Name = '10/2 去程 Natakhtari->Mestia';          Dep = '7'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $true;  Fallback = $false; Sequential = $false }
     @{ Tag = '回程·优先'; Name = '10/5 回程 Mestia->Natakhtari (2 张)';    Dep = '6'; Arr = '7'; Date = '10/05/2026'; Pax = 2; MaxProbe = 2; Loud = $true;  Fallback = $false; Sequential = $true }
-    @{ Tag = '备选';     Name = '10/2 去程 Kutaisi->Mestia';             Dep = '5'; Arr = '6'; Date = '10/02/2026'; Pax = 4; MaxProbe = 4; Loud = $false; Fallback = $false; Sequential = $false }
     @{ Tag = '回程·次要'; Name = '10/5 回程 Mestia->Kutaisi (2 张)';       Dep = '6'; Arr = '5'; Date = '10/05/2026'; Pax = 2; MaxProbe = 4; Loud = $false; Fallback = $true;  Sequential = $true }
 )
 
@@ -272,7 +271,7 @@ function Send-CloudHeartbeat {
     $title  = if ($allBad) { '云端监测：这段时间轮轮出错' } else { '云端监测正常' }
     $body   = "北京时间 $($bj.ToString('HH:mm'))｜过去 $mins 分钟查了 $hbRounds 轮，出错 $hbErrRounds 轮"
     $body  += if ($hbHits -gt 0) { "`n主抢期间有 $hbHits 次命中，强提醒已单独发出" } else { '，主抢（Natakhtari 往返）无票' }
-    # 2026-09-28 加：安静腿（Kutaisi 回程 / 备选去程）不单独推，状态并在这里
+    # 2026-09-28 加：安静腿（Kutaisi 回程）不单独推，状态并在这里
     foreach ($k in $QuietStatus.Keys) { $body += "`n$k：$($QuietStatus[$k])" }
     $body  += "`n本趟跑到北京时间 $($bjEnd.ToString('HH:mm'))，之后自动接力"
     $level  = if ($allBad) { 'active' } else { 'passive' }
